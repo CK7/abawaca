@@ -1,77 +1,153 @@
 #include <iostream>
 #include <stdio.h>
 #include <string.h>
-#include <stdlib.h>
+#include <exception>
 #include "ScafDpData.h"
+#include "SeqIORead_fasta.h"
+
+using namespace Bio;
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-ScafDpData::ScafDpData(const char* esom_names_file) : dp2scaf_array(NULL), scaf_id2ndps_array(NULL), num_scafs(0), num_dps(0)
+ScafDpData::ScafDpData(string esom_names_file, string fasta_file, string info_file)
 {
-	FILE* fp = fopen(esom_names_file, "r");
+	FILE* fp = NULL;
+	char line[8192] = {};
 
-	if(!fp) {
-		cerr << __FILE__ << " (" << __LINE__ << "): Fatal error: could not read " << esom_names_file << endl << endl;
-		exit(-1);
+	if(!(fp = fopen(info_file.c_str(), "r"))) {
+		throw invalid_argument(string(__FILE__) + " (" + to_string(__LINE__) + "): could not read " + info_file);
 	}
 
-	char line[8192] = {};
+	map<string, double>	scaf_name2cvg;
+	while(fgets(line, 8192, fp)) {
+		// gwd1_scaffold_0 556922  17.599  0.363   0
+		char seq_name[512];
+		double cvg, gc;
+		size_t Ns, length;
+		if(sscanf(line, "%s %lu %lf %lf %lu", seq_name, &length, &cvg, &gc, &Ns) != 5) {
+			char s[2048];
+			sprintf(s, "%s (%d): Illegal line in file %s:\n%s", __FILE__, __LINE__, info_file.c_str(), line);
+			throw invalid_argument(s);
+		}
+		scaf_name2cvg.insert(pair<string, double>(seq_name, cvg));
+	}
+	fclose(fp);
+
+	if(!(fp = fopen(esom_names_file.c_str(), "r"))) {
+		char s[2048];
+		sprintf(s, "%s (%d): could not read %s", __FILE__, __LINE__, esom_names_file.c_str());
+		throw invalid_argument(s);
+	}
+
 	if(!fgets(line, 8192, fp)) {
-		cerr << __FILE__ << " (" << __LINE__ << "): Fatal error: " << esom_names_file << " is empty" << endl << endl;
-		exit(-1);
+		char s[2048];
+		sprintf(s, "%s (%d): file %s is empty", __FILE__, __LINE__, esom_names_file.c_str());
+		throw invalid_argument(s);
 	}
 
 	// % 8430
 	unsigned int t1, t2;
 	char	c;
 	if((sscanf(line, "%c %u", &c, &t1) != 2) || (c != '%')) {
-		cerr << __FILE__ << " (" << __LINE__ << "): Fatal error: unexpected line in " << esom_names_file << ": " << endl << line << endl << endl;
-		exit(-1);
-	}
-	num_dps = t1;
-
-	if(!(dp2scaf_array = (size_t*)calloc(num_dps+1, sizeof(size_t)))) {
-		cerr << __FILE__ << " (" << __LINE__ << "): Fatal error: could not allocate space for " << num_dps << " datapoints as specified in " << esom_names_file << endl << endl;
-		exit(-1);
+		char s[2048];
+		sprintf(s, "%s (%d): unexpected line in file %s:\n%s", __FILE__, __LINE__, esom_names_file.c_str(), line);
+		throw invalid_argument(s);
 	}
 
+	map<string, set<DataPoint> >	scaf2dps;
 	while(fgets(line, 8192, fp)) {
-		// 1	311210.1119.1809_1	311210.1119.1809
-		size_t 	dp;
-		char	scaf[512], desc[512];
-		if((sscanf(line, "%u %s %s", &t1, scaf, desc) != 3) || (strrchr(scaf, '_') == NULL)) {
-			cerr << __FILE__ << " (" << __LINE__ << "): Fatal error: unexpected line in " << esom_names_file << ": " << endl << line << endl << endl;
-			exit(-1);
-		}
-		dp = t1;
-		char* p;
-		for(p=scaf+strlen(scaf)-1; *p!='_'; p--) {
-			if((*p<'0') || (*p>'9')) {
-				cerr << __FILE__ << " (" << __LINE__ << "): Unexpected postfix in datapoint name (second field) of this line, should be digits only: " << line << endl;
-				exit(-1);
-			}
-		}
-		*p = 0;
+		// 1    gwd1_scaffold_20283_1   gwd1_scaffold_20283:(1,2072), 1 segment(s), 2072/2072 non-N bps
+		// 1	gwd1_scaffold_0_1	gwd1_scaffold_0(1, 2003), 2003/2003 non-Ns bps
+		size_t 	dp=0, start=0, end=0, non_Ns=0, length=0, nsegments=0;
+		char	scaf[512]{}, gene_name[512]={}, *p1, *p2, *p3, *p4, *p5;
 
-		map<string, size_t>::const_iterator it = scaf_name2id_map.find(scaf);
-		if(it == scaf_name2id_map.end()) {
-			scaf_name2id_map[scaf] = ++num_scafs;
-			it = scaf_name2id_map.find(scaf);
+		p1 = strchr(line, ':');
+		p2 = strchr(line, '(');
+		p3 = strchr(line, ')');
+		p4 = strchr(line, '/');
+		p5 = strchr(line, ',');
+		if(!p1 || !p2 || !p3 || !p4 || !p5) {
+			char s[2048];
+			sprintf(s, "\n%s (%d): unexpected line in file %s:\n%s\n", __FILE__, __LINE__, esom_names_file.c_str(), line);
+			throw invalid_argument(s);
 		}
-		dp2scaf_array[dp] = it->second;
+		*p1 = *p2 = *p3 = *p4 = *p5 = ' ';
+		if((sscanf(line, "%lu %s %s %lu %lu , %lu segment(s), %lu %lu non-N bps", &dp, gene_name, scaf, &start, &end, &nsegments, &non_Ns, &length) != 8) &&
+		   (sscanf(line, "%lu %s %s %lu %lu , %lu %lu non-N bps", &dp, gene_name, scaf, &start, &end, &non_Ns, &length) != 7)) {
+			char s[2048];
+			sprintf(s, "\n%s (%d): unexpected line in file %s:\n%sdp=%lu, gene_name=%s, scaf=%s, start=%lu, end=%lu, nsegments=%lu, non_Ns=%lu, length=%lu\nMake sure that your esom files were generated using prepare_esom_files.pl v1.05 or later\n",
+				 __FILE__, __LINE__, esom_names_file.c_str(), line, dp, gene_name, scaf, start, end, nsegments, non_Ns, length);
+			throw invalid_argument(s);
+		}
+		auto sit = scaf2dps.find(scaf);
+		if(sit == scaf2dps.end()) {
+			scaf2dps.insert(pair<string, set<DataPoint> >(scaf, set<DataPoint>()));
+			sit = scaf2dps.find(scaf);
+		}
+		sit->second.insert(DataPoint(0, dp, 0, start, end, length-non_Ns));
 	}
 	fclose(fp);
 
-	if(!(scaf_id2ndps_array = (size_t*)calloc(num_scafs+1, sizeof(size_t)))) {
-		cerr << __FILE__ << " (" << __LINE__ << "): Fatal error: could not allocate space for " << num_dps << " datapoints as specified in " << esom_names_file << endl << endl;
-		exit(-1);
+	dps.resize(1);
+	for(auto sit = scaf2dps.begin(); sit != scaf2dps.end(); sit++) {
+		if(sit->second.size() == 1)
+			continue;
+		scaf_name2id_map.insert(pair<string, size_t>(sit->first, scaf_name2id_map.size()+1));
+		for(auto dpit=sit->second.begin(); dpit != sit->second.end(); dpit++) {
+			dps.push_back(DataPoint(dps.size(), dpit->get_name(), scaf_name2id_map.size(), dpit->get_start(), dpit->get_end(), dpit->get_Ns()));
+			dp_name2id_map.insert(pair<size_t, size_t>(dps.back().get_name(), dps.back().get_iid()));
+		}
 	}
 
-	scaf_id2name_array.resize(num_scafs+1);
-	for(map<string, size_t>::const_iterator it = scaf_name2id_map.begin(); it!=scaf_name2id_map.end(); it++)
-		scaf_id2name_array[it->second] = it->first;
+	scafs.resize(scaf_name2id_map.size()+1);
+	Bio::SeqIORead_fasta<Bio::DNASequence>	reader(fasta_file);
+	Bio::DNASequence* seq_obj;
 
+	while((seq_obj = reader.next_seq()) != NULL) {
+		auto it=scaf_name2id_map.find(seq_obj->display_id());
+		auto mit = scaf_name2cvg.find(seq_obj->display_id());
+		double cvg = (mit == scaf_name2cvg.end())? 0 : mit->second;
+		if(it != scaf_name2id_map.end()) {
+			scafs[it->second] = Seq(it->second, seq_obj, cvg);
+		}
+		else {
+			delete(seq_obj);
+		}
+	}
 
-	for(size_t dp=1; dp<=num_dps; dp++)
-		scaf_id2ndps_array[dp2scaf_array[dp]]++;
+	auto it=dps.begin();
+	for(++it; it!=dps.end(); it++)
+		scafs[it->get_scaf_id()] += *it;
+}
 
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+size_t ScafDpData::dp2scaf(size_t dp) const
+{
+	if((dp == 0) || (dp >= dps.size())) {
+		char s[2048];
+		sprintf(s, "%s (%d): Invalid dp %lu", __FILE__, __LINE__, dp);
+		throw invalid_argument(s);
+	}
+	return dps[dp].get_scaf_id();
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+size_t ScafDpData::ndps(size_t scaf_id) const
+{
+	if((scaf_id == 0) || (scaf_id >= scafs.size())) {
+		char s[2048];
+		sprintf(s, "%s (%d): Invalid scaf_id %lu", __FILE__, __LINE__, scaf_id);
+		throw invalid_argument(s);
+	}
+        return scafs[scaf_id].get_scaf_dps().size();
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+string ScafDpData::scaf_id2name(size_t scaf_id) const
+{
+	if((scaf_id == 0) || (scaf_id >= scafs.size())) {
+		char s[2048];
+		sprintf(s, "%s (%d): Invalid scaf_id %lu", __FILE__, __LINE__, scaf_id);
+		throw invalid_argument(s);
+	}
+        return scafs[scaf_id].get_seq_obj()->display_id();
 }

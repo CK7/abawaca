@@ -19,10 +19,10 @@ Dimension::Dimension(const vector<size_t>& dp_ids, const vector<double>& dp_valu
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-Dimension::Dimension(const Dimension& dimension, const set<size_t>& dp_ids) : dimension_index(dimension.dimension_index), 
+Dimension::Dimension(const Dimension& dimension, const unordered_set<size_t>& dp_ids) : dimension_index(dimension.dimension_index), 
 	dimension_name(dimension.dimension_name)
 {
-	for(set<size_t>::const_iterator vits = dp_ids.begin(); vits != dp_ids.end(); vits++)
+	for(auto vits = dp_ids.begin(); vits != dp_ids.end(); vits++)
 		this->insert(*vits, dimension.get_value(*vits));
 }
 

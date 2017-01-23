@@ -3,6 +3,7 @@
 
 #include <vector>
 #include <set>
+#include <unordered_set>
 #include <string>
 #include <map>
 
@@ -17,8 +18,8 @@ class ClusterData;
 class Dimension {
 public:
 	struct DataPoint{
-		size_t		dp;
-		double		value;
+		size_t				dp;
+		double				value;
 		DataPoint() : dp(-1), value(-1)	{}
 		DataPoint(size_t _dp, double _value) : dp(_dp), value(_value)			{}
 		bool 				operator < (const DataPoint& other) const	{return (this->dp < other.dp);}
@@ -36,7 +37,7 @@ public:
 	vector<DataPoint>::const_iterator	end() const					{return dps.end();}
 protected:
 	Dimension(const vector<size_t>& dp_ids, const vector<double>& dp_values, size_t dimension_index, string dimension_name);
-	Dimension(const Dimension& dimension, const set<size_t>& dp_ids);
+	Dimension(const Dimension& dimension, const unordered_set<size_t>& dp_ids);
 	Dimension(size_t dimension_index, string dimension_name);
 	const Dimension& insert(size_t dp, double value);
 	friend class ClusterData;

@@ -11,13 +11,13 @@ Cluster::Cluster(const ScafDpData& _scaf_db, const Dimension& dimension, const O
 
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-size_t Cluster::ndps(size_t scaf) const 
+size_t Cluster::ndps(size_t scaf) const
 {
 	map<size_t, size_t>::const_iterator mit = scaf2ndps.find(scaf);
 
 	if(mit==scaf2ndps.end())
 		return 0;
- 
+
 	return mit->second;
 }
 
